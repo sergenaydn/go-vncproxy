@@ -6,12 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
+// TokenHandler represents a function to extract the VNC backend address from an HTTP request
 type TokenHandler func(r *http.Request) (addr string, err error)
 
-// Config represents vnc proxy config
+// Config represents VNC proxy config
 type Config struct {
 	LogLevel    uint32
 	Logger      Logger
@@ -19,18 +20,18 @@ type Config struct {
 	TokenHandler
 }
 
-// Proxy represents vnc proxy
+// Proxy represents VNC proxy
 type Proxy struct {
 	logLevel     uint32
 	logger       *logger
-	dialTimeout  time.Duration // Timeout for connecting to each target vnc server
+	dialTimeout  time.Duration
 	peers        map[*peer]struct{}
 	l            sync.RWMutex
 	tokenHandler TokenHandler
 }
 
-// New returns a vnc proxy
-// If token handler is nil, vnc backend address will always be :5901
+// New returns a VNC proxy
+// If the token handler is nil, the VNC backend address will always be :5901
 func New(conf *Config) *Proxy {
 	if conf.TokenHandler == nil {
 		conf.TokenHandler = func(r *http.Request) (addr string, err error) {
@@ -48,24 +49,35 @@ func New(conf *Config) *Proxy {
 	}
 }
 
-// ServeWS provides websocket handler
-func (p *Proxy) ServeWS(ws *websocket.Conn) {
-	p.logger.Debugf("ServeWS")
-	ws.PayloadType = websocket.BinaryFrame
+// ServeWS provides WebSocket handler
+func (p *Proxy) ServeWS(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
 
-	r := ws.Request()
-	p.logger.Debugf("request url: %v", r.URL)
-
-	// get vnc backend server addr
-	addr, err := p.tokenHandler(r)
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		p.logger.Infof("get vnc backend failed: %v", err)
+		p.logger.Info("Upgrade to WebSocket failed:", err)
 		return
 	}
 
-	peer, err := NewPeer(ws, addr, p.dialTimeout)
+	p.logger.Debugf("ServeWS")
+	p.logger.Debugf("request url: %v", r.URL)
+
+	// get VNC backend server address
+	addr, err := p.tokenHandler(r)
 	if err != nil {
-		p.logger.Infof("new vnc peer failed: %v", err)
+		p.logger.Infof("get VNC backend failed: %v", err)
+		conn.Close()
+		return
+	}
+
+	peer, err := NewPeer(conn, addr, p.dialTimeout)
+	if err != nil {
+		p.logger.Infof("new VNC peer failed: %v", err)
+		conn.Close()
 		return
 	}
 
