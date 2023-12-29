@@ -1,4 +1,4 @@
-module github.com/evangwt/go-vncproxy
+module github.com/sergenaydn/go-vncproxy
 
 go 1.12
 
